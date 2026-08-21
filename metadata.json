@@ -1,0 +1,6 @@
+{
+  "name": "SheetBoard Kanban",
+  "description": "Transform Google Sheets into modern Trello-style Kanban boards with Campaign & ETA tracking, Organization Team Messages & Announcements, real-time 2-way sync, custom wallpapers, and workflow variations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
