@@ -25,10 +25,6 @@ import {
   Maximize2,
   File,
   Layers,
-  Folder,
-  HardDrive,
-  FolderPlus,
-  RefreshCw,
 } from 'lucide-react';
 import {
   CardAttachment,
@@ -36,21 +32,9 @@ import {
   CardItem,
   CardLabel,
   CardMember,
-  CardStatus,
   ColumnList,
   PriorityLevel,
 } from '../types';
-import {
-  CARD_STATUS_CONFIG,
-  ALL_CARD_STATUSES,
-  getNormalizedCardStatus,
-} from '../utils/statusConfig';
-import { CardDriveFolderModal } from './CardDriveFolderModal';
-import {
-  uploadFileToDriveFolder,
-  isDriveConnected,
-  requestGoogleDriveToken,
-} from '../services/googleDriveService';
 
 interface CardDetailModalProps {
   card: CardItem;
@@ -60,7 +44,6 @@ interface CardDetailModalProps {
   onDeleteCard: (cardId: string) => void;
   currentUser?: { name: string; avatar?: string; email?: string } | null;
   onOpenOrgMessages?: (card: CardItem) => void;
-  onShowToast?: (type: 'success' | 'error' | 'info' | 'warning', title: string, message: string) => void;
 }
 
 const COVER_COLORS = [
@@ -113,11 +96,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [newAttachmentName, setNewAttachmentName] = useState('');
   const [newAttachmentUrl, setNewAttachmentUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgressStatus, setUploadProgressStatus] = useState<string>('');
   const [isDragOverAtt, setIsDragOverAtt] = useState(false);
-
-  // Google Drive Folder Modal state
-  const [showDriveFolderModal, setShowDriveFolderModal] = useState(false);
 
   // Preview Lightbox state (for Photos & PDFs)
   const [previewAttachment, setPreviewAttachment] = useState<CardAttachment | null>(null);
@@ -155,30 +134,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
       ...card,
       listId: targetListId,
       completed: isDone,
-      updatedAt: new Date().toISOString(),
-    });
-  };
-
-  const handleStatusChange = (status: CardStatus) => {
-    const isDone = status === 'done';
-    let matchingListId = card.listId;
-    if (status === 'done') {
-      matchingListId = lists.find((l) => l.title.toLowerCase().includes('done') || l.title.toLowerCase().includes('complete'))?.id || card.listId;
-    } else if (status === 'in_process') {
-      matchingListId = lists.find((l) => l.title.toLowerCase().includes('progress') || l.title.toLowerCase().includes('process'))?.id || card.listId;
-    } else if (status === 'in_review') {
-      matchingListId = lists.find((l) => l.title.toLowerCase().includes('review'))?.id || card.listId;
-    } else if (status === 'backlog') {
-      matchingListId = lists.find((l) => l.title.toLowerCase().includes('backlog'))?.id || card.listId;
-    } else if (status === 'pending') {
-      matchingListId = lists.find((l) => l.title.toLowerCase().includes('todo') || l.title.toLowerCase().includes('pending'))?.id || card.listId;
-    }
-
-    onUpdateCard({
-      ...card,
-      status,
-      completed: isDone,
-      listId: matchingListId,
       updatedAt: new Date().toISOString(),
     });
   };
@@ -300,92 +255,22 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   };
 
   // -------------------------------------------------------------
-  // File Upload Handlers (Direct to Drive Folder or Local Embed)
+  // File Upload Handlers (Photos, PDFs, Documents)
   // -------------------------------------------------------------
-  const processFiles = async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-
+  const processFiles = (files: FileList | File[]) => {
     setIsUploading(true);
     const newAttachments: CardAttachment[] = [];
-    const hasDriveFolder = Boolean(card.driveFolderId);
-    const driveConnected = isDriveConnected();
+    let filesProcessed = 0;
+    const totalFiles = files.length;
 
-    // Check if we should upload to Google Drive
-    if (hasDriveFolder && driveConnected) {
-      setUploadProgressStatus(`Uploading to Google Drive folder "${card.driveFolderName || 'Card Folder'}"...`);
+    Array.from(files).forEach((file) => {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isImage = file.type.startsWith('image/');
+      const fileType = isPdf ? 'pdf' : isImage ? 'image' : 'file';
 
-      for (let i = 0; i < fileArray.length; i++) {
-        const file = fileArray[i];
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const isImage = file.type.startsWith('image/');
-        const fileType = isPdf ? 'pdf' : isImage ? 'image' : 'file';
-
-        try {
-          setUploadProgressStatus(`Uploading ${file.name} to Google Drive (${i + 1}/${fileArray.length})...`);
-          
-          // Also create local preview fallback dataUrl for instant snappy rendering
-          const dataUrl = await new Promise<string>((res) => {
-            const r = new FileReader();
-            r.onload = (e) => res((e.target?.result as string) || '');
-            r.readAsDataURL(file);
-          });
-
-          // Upload directly into card's Drive folder
-          const driveResult = await uploadFileToDriveFolder(file, card.driveFolderId!);
-
-          const attachment: CardAttachment = {
-            id: `att-drive-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            name: file.name,
-            url: driveResult.webViewLink || dataUrl,
-            type: fileType,
-            size: driveResult.size || formatBytes(file.size),
-            mimeType: file.type,
-            driveFileId: driveResult.fileId,
-            driveFolderId: card.driveFolderId,
-            driveFileUrl: driveResult.webViewLink,
-            uploadedAt: new Date().toISOString(),
-            uploadStatus: 'success',
-            createdAt: new Date().toISOString(),
-          };
-          newAttachments.push(attachment);
-        } catch (err: any) {
-          console.error('Google Drive direct upload failed for', file.name, err);
-          // Fallback to local embedded attachment if Drive upload errors
-          const dataUrl = await new Promise<string>((res) => {
-            const r = new FileReader();
-            r.onload = (e) => res((e.target?.result as string) || '');
-            r.readAsDataURL(file);
-          });
-
-          const attachment: CardAttachment = {
-            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            name: file.name,
-            url: dataUrl,
-            type: fileType,
-            size: formatBytes(file.size),
-            mimeType: file.type,
-            uploadStatus: 'error',
-            uploadError: err.message || 'Drive upload failed, saved locally',
-            createdAt: new Date().toISOString(),
-          };
-          newAttachments.push(attachment);
-        }
-      }
-    } else {
-      // Standard local embedded file reader
-      setUploadProgressStatus('Attaching files...');
-      for (const file of fileArray) {
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const isImage = file.type.startsWith('image/');
-        const fileType = isPdf ? 'pdf' : isImage ? 'image' : 'file';
-
-        const dataUrl = await new Promise<string>((res) => {
-          const r = new FileReader();
-          r.onload = (e) => res((e.target?.result as string) || '');
-          r.readAsDataURL(file);
-        });
-
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
         if (dataUrl) {
           const attachment: CardAttachment = {
             id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -398,17 +283,20 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           };
           newAttachments.push(attachment);
         }
-      }
-    }
 
-    setIsUploading(false);
-    setUploadProgressStatus('');
-
-    onUpdateCard({
-      ...card,
-      attachments: [...(card.attachments || []), ...newAttachments],
-      coverImage: card.coverImage || newAttachments.find((a) => a.type === 'image')?.url,
-      updatedAt: new Date().toISOString(),
+        filesProcessed++;
+        if (filesProcessed === totalFiles) {
+          setIsUploading(false);
+          onUpdateCard({
+            ...card,
+            attachments: [...(card.attachments || []), ...newAttachments],
+            // If it's the first image uploaded and no cover is set, optionally set as cover
+            coverImage: card.coverImage || (newAttachments.find((a) => a.type === 'image')?.url),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      };
+      reader.readAsDataURL(file);
     });
   };
 
@@ -567,34 +455,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             <div className="md:col-span-2 space-y-6">
               {/* Quick Status / Priority / Start Date / ETA Date Bar */}
               <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80">
-                {/* Card Status Selector (Done, Pending, In Process, Hold, In Review, Backlog) */}
-                <div className="flex items-center flex-wrap gap-1.5 w-full pb-2 border-b border-slate-100 dark:border-slate-700/60">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1 mr-1">
-                    <CheckSquare className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>Status:</span>
-                  </span>
-                  {ALL_CARD_STATUSES.map((st) => {
-                    const cfg = CARD_STATUS_CONFIG[st];
-                    const activeStatus = getNormalizedCardStatus(card);
-                    const isSelected = activeStatus === st;
-                    return (
-                      <button
-                        key={st}
-                        type="button"
-                        onClick={() => handleStatusChange(st)}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all border ${
-                          isSelected
-                            ? `${cfg.badgeBg} ${cfg.badgeText} ${cfg.badgeBorder} ring-2 ring-indigo-500/30 scale-105 shadow-2xs`
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-transparent hover:bg-slate-200 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dotColor}`} />
-                        <span>{cfg.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
                 {/* Priority Selector */}
                 <div className="flex items-center gap-1.5">
                   <Flame className="w-3.5 h-3.5 text-slate-400" />
@@ -708,7 +568,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               {/* ATTACHMENTS & PHOTOS & PDFS SECTION */}
               {/* ------------------------------------------------------------- */}
               <div className="space-y-3" id="task-attachments-section">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-bold text-xs">
                     <Paperclip className="w-4 h-4 text-[#0055CC]" />
                     <span>Attachments, Photos & PDFs</span>
@@ -719,35 +579,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Google Drive Folder Selector Button */}
-                    <button
-                      type="button"
-                      onClick={() => setShowDriveFolderModal(true)}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border shadow-2xs ${
-                        card.driveFolderId
-                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                          : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100'
-                      }`}
-                      title={
-                        card.driveFolderId
-                          ? `Linked to Google Drive folder: ${card.driveFolderName || card.driveFolderId}`
-                          : 'Connect dedicated Google Drive folder for this card'
-                      }
-                      id="card-drive-folder-btn"
-                    >
-                      <Folder className="w-3.5 h-3.5" />
-                      <span>
-                        {card.driveFolderId ? (
-                          <span className="truncate max-w-[130px] inline-block align-bottom font-bold">
-                            📁 {card.driveFolderName || 'Drive Linked'}
-                          </span>
-                        ) : (
-                          'Connect Drive Folder'
-                        )}
-                      </span>
-                    </button>
-
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -770,37 +602,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     </button>
                   </div>
                 </div>
-
-                {/* Card Google Drive Folder Indicator Banner if connected */}
-                {card.driveFolderId && (
-                  <div className="p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 truncate">
-                      <Folder className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                      <span className="truncate">
-                        Uploading to Google Drive Folder: <strong className="text-blue-950 dark:text-white font-bold">"{card.driveFolderName || card.driveFolderId}"</strong>
-                      </span>
-                    </div>
-                    {card.driveFolderUrl && (
-                      <a
-                        href={card.driveFolderUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 shrink-0 ml-2"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Open Folder</span>
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                {/* Upload Progress Status Banner */}
-                {uploadProgressStatus && (
-                  <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center gap-2 text-xs text-indigo-900 dark:text-indigo-200 animate-pulse">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
-                    <span className="font-semibold">{uploadProgressStatus}</span>
-                  </div>
-                )}
 
                 {/* Hidden Multi-file input */}
                 <input
@@ -843,16 +644,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     </div>
                     <div>
                       <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {isUploading
-                          ? uploadProgressStatus || 'Reading and uploading files...'
-                          : card.driveFolderId
-                          ? `Upload to Drive Folder "${card.driveFolderName || 'Card Folder'}"`
-                          : 'Upload Photos, PDFs, or Documents'}
+                        {isUploading ? 'Reading and attaching files...' : 'Upload Photos, PDFs, or Documents'}
                       </p>
                       <p className="text-[11px] text-slate-400">
-                        {card.driveFolderId
-                          ? 'Files automatically upload directly to your connected Google Drive folder'
-                          : 'Drag & drop or click to attach (connect a Google Drive folder anytime)'}
+                        Drag and drop files here or click to browse (supports JPG, PNG, WebP, PDF)
                       </p>
                     </div>
                   </div>
@@ -962,7 +757,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                                 {att.name}
                               </p>
                               
-                              <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
+                              <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1">
                                 {isPdf && (
                                   <span className="px-1.5 py-0.2 rounded font-extrabold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 uppercase">
                                     PDF Doc
@@ -971,11 +766,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                                 {isImage && (
                                   <span className="px-1.5 py-0.2 rounded font-bold bg-blue-100 dark:bg-blue-950 text-[#0055CC] dark:text-blue-300 uppercase">
                                     Image
-                                  </span>
-                                )}
-                                {att.driveFileId && (
-                                  <span className="px-1.5 py-0.2 rounded font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center gap-0.5" title="Directly saved in Google Drive">
-                                    <span>📁 Drive File</span>
                                   </span>
                                 )}
                                 {att.size && <span>{att.size}</span>}

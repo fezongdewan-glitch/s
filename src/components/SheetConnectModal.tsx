@@ -30,8 +30,8 @@ interface SheetConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
   board: Board;
-  user?: UserProfile | null;
-  onGoogleSignIn?: () => void;
+  user: UserProfile | null;
+  onGoogleSignIn: () => void;
   onApplyNewBoardData: (newData: {
     lists: Board['lists'];
     cards: Board['cards'];
@@ -49,6 +49,8 @@ export const SheetConnectModal: React.FC<SheetConnectModalProps> = ({
   isOpen,
   onClose,
   board,
+  user,
+  onGoogleSignIn,
   onApplyNewBoardData,
 }) => {
   const [activeTab, setActiveTab] = useState<'url' | 'upload' | 'paste' | 'mapping'>('url');
@@ -83,7 +85,7 @@ export const SheetConnectModal: React.FC<SheetConnectModalProps> = ({
     try {
       let token: string | null = null;
       try {
-        const { getAccessToken } = await import('../services/localAuthPlugin');
+        const { getAccessToken } = await import('../services/firebaseAuth');
         token = await getAccessToken();
       } catch (_) {}
 
@@ -349,6 +351,23 @@ export const SheetConnectModal: React.FC<SheetConnectModalProps> = ({
                   </p>
                 </div>
 
+                {!user && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex items-center justify-between gap-3">
+                    <div className="text-xs text-amber-800 dark:text-amber-300">
+                      <p className="font-bold">Google Sign-in Required for 2-Way Sync</p>
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        Authorizing Google allows real-time reading from and saving back to your spreadsheet.
+                      </p>
+                    </div>
+                    <button
+                      onClick={onGoogleSignIn}
+                      className="px-3.5 py-1.5 bg-[#0055CC] text-white hover:bg-[#0047AB] rounded-xl text-xs font-bold shadow-xs shrink-0 transition-colors"
+                    >
+                      Connect Google
+                    </button>
+                  </div>
+                )}
+
                 <div className="pt-2">
                   <button
                     onClick={() => handleFetchSheetInfo()}
@@ -429,7 +448,7 @@ export const SheetConnectModal: React.FC<SheetConnectModalProps> = ({
                         value={selectedTab}
                         onChange={(e) => {
                           setSelectedTab(e.target.value);
-                          if (board.spreadsheetId) {
+                          if (user && board.spreadsheetId) {
                             handleFetchSheetInfo();
                           }
                         }}

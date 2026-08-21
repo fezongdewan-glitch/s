@@ -25,7 +25,6 @@ interface KanbanColumnProps {
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, targetListId: string) => void;
   onQuickToggleComplete?: (cardId: string) => void;
-  onUpdateStatus?: (cardId: string, status: any) => void;
   onOpenOrgMessages?: (card: CardItem) => void;
 }
 
@@ -42,7 +41,6 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   onDragOver,
   onDrop,
   onQuickToggleComplete,
-  onUpdateStatus,
   onOpenOrgMessages,
 }) => {
   const [isAddingCard, setIsAddingCard] = useState(false);
@@ -214,7 +212,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
       </div>
 
       {/* Cards Scrollable Container */}
-      <div className="flex-1 px-2 py-2 overflow-y-auto flex flex-col gap-2 min-h-0 custom-scrollbar">
+      <div className="flex-1 px-2.5 py-2 overflow-y-auto flex flex-col gap-2 min-h-[100px] max-h-[calc(100vh-230px)] custom-scrollbar">
         {cards.map((card) => (
           <KanbanCard
             key={card.id}
@@ -222,13 +220,12 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
             onClick={() => onCardClick(card)}
             onDragStart={onDragStart}
             onQuickToggleComplete={onQuickToggleComplete}
-            onUpdateStatus={onUpdateStatus}
             onOpenOrgMessages={onOpenOrgMessages}
           />
         ))}
 
         {cards.length === 0 && !isAddingCard && (
-          <div className="h-16 border border-dashed border-gray-300 dark:border-slate-700 rounded-lg flex items-center justify-center text-gray-400 text-xs font-medium">
+          <div className="h-16 border border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400 text-xs font-medium">
             No campaigns
           </div>
         )}

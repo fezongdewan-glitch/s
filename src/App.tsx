@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ActiveView, Board, BoardTheme, CardItem, CardStatus, ColumnList, FilterState, UserOrgProfile, UserProfile } from './types';
+import { ActiveView, Board, BoardTheme, CardItem, ColumnList, EmployeeAuth, FilterState, UserOrgProfile, UserProfile } from './types';
 import { INITIAL_BOARD, BOARD_THEMES } from './services/sampleData';
 import { Header } from './components/Header';
 import { KanbanBoard } from './components/KanbanBoard';
@@ -12,18 +12,17 @@ import { VariationPreviewModal } from './components/VariationPreviewModal';
 import { WallpaperModal } from './components/WallpaperModal';
 import { OrgMessagesModal } from './components/OrgMessagesModal';
 import { OrgIdManagerModal } from './components/OrgIdManagerModal';
-import { OnlineWorkspaceModal } from './components/OnlineWorkspaceModal';
+import { EmployeeLoginPage } from './components/EmployeeLoginPage';
 import { FilterBar } from './components/FilterBar';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { initAuth, getAccessToken, saveLocalStoredUser } from './services/localAuthPlugin';
+import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
 import { getUserOrgProfile, saveUserOrgProfile } from './services/orgMessageService';
 import {
-  getWorkspaceFromUrl,
-  fetchOnlineWorkspace,
-  syncBoardToOnlineWorkspace,
-  setWorkspaceToUrl,
-} from './services/onlineWorkspaceService';
+  getStoredEmployeeAuth,
+  saveStoredEmployeeAuth,
+  employeeToOrgProfile,
+} from './services/employeeAuthService';
 import {
   writeSheetValues,
   fetchSheetValues,
@@ -58,17 +57,15 @@ export default function App() {
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false);
   const [isOrgMessagesOpen, setIsOrgMessagesOpen] = useState(false);
   const [isOrgIdModalOpen, setIsOrgIdModalOpen] = useState(false);
-  const [isOnlineWorkspaceModalOpen, setIsOnlineWorkspaceModalOpen] = useState(false);
+  const [isEmployeeLoginOpen, setIsEmployeeLoginOpen] = useState(false);
+  const [employeeAuth, setEmployeeAuth] = useState<EmployeeAuth | null>(getStoredEmployeeAuth);
   const [orgMessageTargetCampaign, setOrgMessageTargetCampaign] = useState<CardItem | null>(null);
   const [userOrgProfile, setUserOrgProfile] = useState<UserOrgProfile>(() => {
-    const urlOrg = getWorkspaceFromUrl();
-    const current = getUserOrgProfile();
-    if (urlOrg && urlOrg !== current.orgId) {
-      const updated = { ...current, orgId: urlOrg };
-      saveUserOrgProfile(updated);
-      return updated;
+    const storedAuth = getStoredEmployeeAuth();
+    if (storedAuth) {
+      return employeeToOrgProfile(storedAuth);
     }
-    return current;
+    return getUserOrgProfile();
   });
   const [isFilterBarOpen, setIsFilterBarOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -111,40 +108,12 @@ export default function App() {
     userRef.current = user;
   }, [user]);
 
-  // Load online workspace board on initial mount if present
-  useEffect(() => {
-    const initOnlineWorkspace = async () => {
-      const targetOrg = getWorkspaceFromUrl() || userOrgProfile.orgId;
-      if (targetOrg) {
-        try {
-          const ws = await fetchOnlineWorkspace(targetOrg);
-          if (ws && ws.board && ws.board.cards && ws.board.cards.length > 0) {
-            setBoard(ws.board);
-            setHasUnsavedChanges(false);
-          }
-        } catch (e) {
-          console.warn('Initial online workspace sync failed:', e);
-        }
-      }
-    };
-    initOnlineWorkspace();
-  }, [userOrgProfile.orgId]);
-
-  // Save board to local storage & broadcast to online workspace
+  // Save board to local storage whenever modified
   useEffect(() => {
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(board));
     } catch (_) {}
-
-    // Debounced online sync to server
-    const timer = setTimeout(() => {
-      if (userOrgProfile.orgId) {
-        syncBoardToOnlineWorkspace(userOrgProfile.orgId, board, userRef.current);
-      }
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [board, userOrgProfile.orgId]);
+  }, [board]);
 
   // Initialize Firebase Google Auth listener
   useEffect(() => {
@@ -171,11 +140,41 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Google Sign-In handler
+  const handleGoogleSignIn = async () => {
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        addToast('success', 'Connected to Google', `Signed in as ${result.user.displayName || result.user.email}. Live 2-way sync enabled.`);
+      }
+    } catch (err: any) {
+      console.error('Sign-In failed:', err);
+      addToast('error', 'Google Sign-In Failed', err.message || 'Could not complete authentication');
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      await logout();
+      setUser(null);
+      addToast('info', 'Signed Out', 'Disconnected from Google account');
+    } catch (err: any) {
+      addToast('error', 'Sign Out Error', err.message);
+    }
+  };
+
   // Core Push to Google Sheets helper
   const pushToGoogleSheets = async (targetBoard: Board, silent = false) => {
     if (!targetBoard.spreadsheetId) return false;
 
     const token = await getAccessToken();
+    if (!token) {
+      if (!silent) {
+        addToast('warning', 'Google Sign-In Required', 'Please connect your Google account to sync spreadsheet data.');
+      }
+      return false;
+    }
 
     const tabName = targetBoard.sheetTabName || 'Sheet1';
     const rows = convertCardsToSpreadsheetRows(
@@ -200,7 +199,7 @@ export default function App() {
     } catch (err: any) {
       console.error('Push to sheets failed:', err);
       if (!silent) {
-        addToast('info', 'Local Changes Saved', 'Board data saved locally to browser storage.');
+        addToast('error', 'Sync Failed', err.message || 'Could not update Google Sheet');
       }
       return false;
     } finally {
@@ -372,22 +371,6 @@ export default function App() {
   const handleMoveCard = (cardId: string, targetListId: string) => {
     const targetList = board.lists.find((l) => l.id === targetListId);
     const isDone = targetList?.title.toLowerCase().includes('done') || targetList?.title.toLowerCase().includes('complete');
-    const isHold = targetList?.title.toLowerCase().includes('hold') || targetList?.title.toLowerCase().includes('block');
-    const isReview = targetList?.title.toLowerCase().includes('review') || targetList?.title.toLowerCase().includes('qa');
-    const isBacklog = targetList?.title.toLowerCase().includes('backlog');
-    const isPending = targetList?.title.toLowerCase().includes('todo') || targetList?.title.toLowerCase().includes('pending');
-
-    const inferredStatus: CardStatus = isDone
-      ? 'done'
-      : isHold
-      ? 'hold'
-      : isReview
-      ? 'in_review'
-      : isBacklog
-      ? 'backlog'
-      : isPending
-      ? 'pending'
-      : 'in_process';
 
     setBoard((prev) => ({
       ...prev,
@@ -397,49 +380,12 @@ export default function App() {
               ...c,
               listId: targetListId,
               completed: isDone,
-              status: inferredStatus,
               order: prev.cards.filter((other) => other.listId === targetListId).length,
               updatedAt: new Date().toISOString(),
             }
           : c
       ),
     }));
-    setHasUnsavedChanges(true);
-  };
-
-  const handleUpdateCardStatus = (cardId: string, status: CardStatus) => {
-    setBoard((prev) => {
-      const isDone = status === 'done';
-      // Optionally find matching column if exists
-      let matchingListId: string | undefined;
-      if (status === 'done') {
-        matchingListId = prev.lists.find((l) => l.title.toLowerCase().includes('done') || l.title.toLowerCase().includes('complete'))?.id;
-      } else if (status === 'in_process') {
-        matchingListId = prev.lists.find((l) => l.title.toLowerCase().includes('progress') || l.title.toLowerCase().includes('process'))?.id;
-      } else if (status === 'in_review') {
-        matchingListId = prev.lists.find((l) => l.title.toLowerCase().includes('review'))?.id;
-      } else if (status === 'backlog') {
-        matchingListId = prev.lists.find((l) => l.title.toLowerCase().includes('backlog'))?.id;
-      } else if (status === 'pending') {
-        matchingListId = prev.lists.find((l) => l.title.toLowerCase().includes('todo') || l.title.toLowerCase().includes('pending'))?.id;
-      }
-
-      return {
-        ...prev,
-        cards: prev.cards.map((c) => {
-          if (c.id === cardId) {
-            return {
-              ...c,
-              status,
-              completed: isDone,
-              listId: matchingListId || c.listId,
-              updatedAt: new Date().toISOString(),
-            };
-          }
-          return c;
-        }),
-      };
-    });
     setHasUnsavedChanges(true);
   };
 
@@ -452,7 +398,6 @@ export default function App() {
           return {
             ...c,
             completed: nextCompleted,
-            status: nextCompleted ? 'done' : 'in_process',
             updatedAt: new Date().toISOString(),
           };
         }
@@ -639,11 +584,41 @@ export default function App() {
     addToast('success', 'Template Loaded', `Now showing "${templateData.title}" with live interactive support.`);
   };
 
+  const handleLoginEmployee = (auth: EmployeeAuth) => {
+    setEmployeeAuth(auth);
+    saveStoredEmployeeAuth(auth);
+    const profile = employeeToOrgProfile(auth);
+    setUserOrgProfile(profile);
+    saveUserOrgProfile(profile);
+    setIsEmployeeLoginOpen(false);
+    addToast(
+      'success',
+      `Welcome, ${auth.employeeName}!`,
+      `Authenticated into ${auth.orgId} (${auth.role})`
+    );
+  };
+
+  const handleLogoutEmployee = () => {
+    setEmployeeAuth(null);
+    saveStoredEmployeeAuth(null);
+    addToast('info', 'Employee Signed Out', 'Switched to guest session mode.');
+  };
+
   return (
     <div
       className={`min-h-screen flex flex-col bg-gradient-to-br ${board.theme.gradient} transition-all duration-300 font-sans relative overflow-x-hidden`}
       id="main-app-container"
     >
+      {/* Employee Login Portal Page Overlay */}
+      {isEmployeeLoginOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-950 overflow-y-auto animate-in fade-in">
+          <EmployeeLoginPage
+            onLoginSuccess={handleLoginEmployee}
+            onContinueAsGuest={() => setIsEmployeeLoginOpen(false)}
+          />
+        </div>
+      )}
+
       {/* Live Custom Wallpaper & Background Image Layer */}
       {board.theme.wallpaperUrl && (
         <div
@@ -674,6 +649,11 @@ export default function App() {
           onUpdateFilter={setFilterState}
           user={user}
           userOrgProfile={userOrgProfile}
+          employeeAuth={employeeAuth}
+          onGoogleSignIn={handleGoogleSignIn}
+          onGoogleSignOut={handleGoogleSignOut}
+          onOpenEmployeeLogin={() => setIsEmployeeLoginOpen(true)}
+          onEmployeeLogout={handleLogoutEmployee}
           isSyncing={isSyncing}
           onSyncWithGoogleSheets={handleSyncWithGoogleSheets}
           onOpenSheetModal={() => setIsSheetModalOpen(true)}
@@ -690,7 +670,6 @@ export default function App() {
             setIsOrgMessagesOpen(true);
           }}
           onOpenOrgIdManager={() => setIsOrgIdModalOpen(true)}
-          onOpenOnlineWorkspaceModal={() => setIsOnlineWorkspaceModalOpen(true)}
         />
 
       {/* Filter Drawer */}
@@ -731,7 +710,6 @@ export default function App() {
             onSetWipLimit={handleSetWipLimit}
             onMoveCard={handleMoveCard}
             onQuickToggleComplete={handleQuickToggleComplete}
-            onUpdateStatus={handleUpdateCardStatus}
             onOpenOrgMessages={(card) => {
               setOrgMessageTargetCampaign(card);
               setIsOrgMessagesOpen(true);
@@ -840,26 +818,6 @@ export default function App() {
         />
       )}
 
-      {/* Online Workspace Login & Workspace Finder Modal */}
-      {isOnlineWorkspaceModalOpen && (
-        <OnlineWorkspaceModal
-          isOpen={isOnlineWorkspaceModalOpen}
-          onClose={() => setIsOnlineWorkspaceModalOpen(false)}
-          currentOrgProfile={userOrgProfile}
-          currentUser={user}
-          board={board}
-          onWorkspaceSwitched={(newProfile, newUser, onlineBoard) => {
-            setUserOrgProfile(newProfile);
-            setUser(newUser);
-            saveLocalStoredUser(newUser);
-            if (onlineBoard && onlineBoard.cards && onlineBoard.cards.length > 0) {
-              setBoard(onlineBoard);
-            }
-          }}
-          onShowToast={addToast}
-        />
-      )}
-
       {/* Organization ID & Connected Team Members Workspace Modal */}
       {isOrgIdModalOpen && (
         <OrgIdManagerModal
@@ -875,21 +833,6 @@ export default function App() {
               `Active Org ID: ${updated.orgId} (${updated.orgName})`
             );
           }}
-          onSwitchToEmployee={(member) => {
-            const switchedUser: UserProfile = {
-              uid: member.id,
-              displayName: member.name,
-              email: member.email,
-              photoURL: member.avatar,
-            };
-            setUser(switchedUser);
-            saveLocalStoredUser(switchedUser);
-            addToast(
-              'success',
-              'Switched Active Profile',
-              `Now signed in as ${member.name} (${member.role} • ${userOrgProfile.orgId})`
-            );
-          }}
         />
       )}
 
@@ -900,6 +843,7 @@ export default function App() {
           onClose={() => setIsSheetModalOpen(false)}
           board={board}
           user={user}
+          onGoogleSignIn={handleGoogleSignIn}
           onApplyNewBoardData={handleApplyNewBoardData}
         />
       )}

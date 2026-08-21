@@ -13,6 +13,7 @@ import {
   ExternalLink,
   ChevronDown,
   Check,
+  LogOut,
   Plus,
   Share2,
   FileText,
@@ -23,10 +24,10 @@ import {
   KeyRound,
   Users,
   Layers,
+  UserCheck,
   Briefcase,
-  Globe,
 } from 'lucide-react';
-import { ActiveView, Board, BoardTheme, FilterState, UserOrgProfile, UserProfile } from '../types';
+import { ActiveView, Board, BoardTheme, EmployeeAuth, FilterState, UserOrgProfile, UserProfile } from '../types';
 import { BOARD_THEMES } from '../services/sampleData';
 
 interface HeaderProps {
@@ -36,8 +37,13 @@ interface HeaderProps {
   filterState: FilterState;
   onToggleFilterBar: () => void;
   onUpdateFilter?: (filter: FilterState) => void;
-  user?: UserProfile | null;
+  user: UserProfile | null;
   userOrgProfile?: UserOrgProfile;
+  employeeAuth?: EmployeeAuth | null;
+  onGoogleSignIn: () => void;
+  onGoogleSignOut: () => void;
+  onOpenEmployeeLogin?: () => void;
+  onEmployeeLogout?: () => void;
   isSyncing: boolean;
   onSyncWithGoogleSheets: () => void;
   onOpenSheetModal: () => void;
@@ -51,7 +57,6 @@ interface HeaderProps {
   onOpenVariationModal?: () => void;
   onOpenOrgMessages?: () => void;
   onOpenOrgIdManager?: () => void;
-  onOpenOnlineWorkspaceModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -63,6 +68,11 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateFilter,
   user,
   userOrgProfile,
+  employeeAuth,
+  onGoogleSignIn,
+  onGoogleSignOut,
+  onOpenEmployeeLogin,
+  onEmployeeLogout,
   isSyncing,
   onSyncWithGoogleSheets,
   onOpenSheetModal,
@@ -76,14 +86,14 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVariationModal,
   onOpenOrgMessages,
   onOpenOrgIdManager,
-  onOpenOnlineWorkspaceModal,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(board.title);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [showWorkspaceToolsMenu, setShowWorkspaceToolsMenu] = useState(false);
-
+  const [showEmployeeMenu, setShowEmployeeMenu] = useState(false);
 
   // Compute all unique characters on this board for quick one-click filtering
   const allCharacters = React.useMemo(() => {
@@ -220,42 +230,221 @@ export const Header: React.FC<HeaderProps> = ({
             />
           </div>
 
-          {/* Online Login & Workspace Switcher Button */}
-          {onOpenOnlineWorkspaceModal && (
-            <button
-              onClick={onOpenOnlineWorkspaceModal}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all cursor-pointer shadow-xs"
-              title="Online Login, Join Workspace Code, or Find Board"
-              id="online-login-find-btn"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Online Login / Find</span>
-            </button>
+          {/* Employee Auth Badge / Portal Trigger */}
+          {employeeAuth && employeeAuth.isLoggedIn ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmployeeMenu(!showEmployeeMenu);
+                  setShowUserMenu(false);
+                  setShowWorkspaceToolsMenu(false);
+                }}
+                className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white transition-all cursor-pointer shadow-xs"
+                id="employee-session-btn"
+                title={`Logged in as ${employeeAuth.employeeName} (${employeeAuth.employeeId})`}
+              >
+                <img
+                  src={employeeAuth.avatar}
+                  alt={employeeAuth.employeeName}
+                  className="w-6 h-6 rounded-full bg-white/20 object-cover ring-1 ring-white/40"
+                />
+                <div className="text-left hidden md:block">
+                  <div className="flex items-center gap-1.5 leading-none">
+                    <span className="text-xs font-bold">{employeeAuth.employeeName}</span>
+                    <span className="text-[9px] font-mono px-1 rounded bg-indigo-500/40 text-indigo-200">
+                      {employeeAuth.employeeId}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-white/70 leading-none">
+                    {employeeAuth.orgId}
+                  </span>
+                </div>
+                <ChevronDown className="w-3 h-3 text-white/70" />
+              </button>
+
+              {showEmployeeMenu && (
+                <div className="absolute right-0 mt-2 w-72 bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 p-4 z-50 animate-in fade-in zoom-in-95 text-slate-100">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+                    <img
+                      src={employeeAuth.avatar}
+                      alt={employeeAuth.employeeName}
+                      className="w-11 h-11 rounded-full bg-slate-800 ring-2 ring-indigo-500/40 object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-white truncate">{employeeAuth.employeeName}</p>
+                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300">
+                          {employeeAuth.employeeId}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 truncate">{employeeAuth.role}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{employeeAuth.employeeEmail}</p>
+                    </div>
+                  </div>
+
+                  <div className="py-2.5 space-y-2 text-xs">
+                    <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">Organization ID:</span>
+                        <span className="font-mono text-indigo-400 font-bold text-xs">{employeeAuth.orgId}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">Department:</span>
+                        <span className="text-slate-300 font-medium text-[11px]">{employeeAuth.department}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">Org Name:</span>
+                        <span className="text-slate-300 text-[11px] truncate max-w-[150px]">{employeeAuth.orgName}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 flex flex-col gap-1.5">
+                    {onOpenOrgIdManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEmployeeMenu(false);
+                          onOpenOrgIdManager();
+                        }}
+                        className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>Manage Organization &amp; Members</span>
+                      </button>
+                    )}
+
+                    {onOpenEmployeeLogin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEmployeeMenu(false);
+                          onOpenEmployeeLogin();
+                        }}
+                        className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Switch Employee / Portal</span>
+                      </button>
+                    )}
+
+                    {onEmployeeLogout && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEmployeeMenu(false);
+                          onEmployeeLogout();
+                        }}
+                        className="w-full py-2 px-3 rounded-xl hover:bg-rose-500/10 text-rose-400 hover:text-rose-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out Employee</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            onOpenEmployeeLogin && (
+              <button
+                type="button"
+                onClick={onOpenEmployeeLogin}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/90 hover:bg-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+                id="employee-login-trigger-btn"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Employee Login</span>
+              </button>
+            )
           )}
 
-          {/* User / Workspace Profile Pill */}
-          <button
-            onClick={onOpenOnlineWorkspaceModal || onOpenOrgIdManager}
-            className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white shadow-xs transition-colors cursor-pointer"
-            title="Click to switch user, change workspace, or invite others"
-            id="workspace-user-profile-btn"
-          >
-            <div className="w-6 h-6 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold text-[10px]">
-              {user?.displayName
-                ? user.displayName.slice(0, 2).toUpperCase()
-                : userOrgProfile?.userName
-                ? userOrgProfile.userName.slice(0, 2).toUpperCase()
-                : 'JD'}
+          {/* User Profile / Auth Avatar */}
+          {user ? (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowUserMenu(!showUserMenu);
+                  setShowThemeMenu(false);
+                  setShowExportMenu(false);
+                }}
+                className="w-8 h-8 rounded-full bg-[#DFE1E6] text-[#172B4D] flex items-center justify-center text-xs font-bold overflow-hidden ring-2 ring-white/30 hover:ring-white transition-all"
+                id="user-profile-btn"
+                title={user.displayName || user.email || 'Account'}
+              >
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || 'User'}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span>{user.displayName ? user.displayName.slice(0, 2).toUpperCase() : 'JD'}</span>
+                )}
+              </button>
+
+              {showUserMenu && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-200 p-3 z-50 animate-in fade-in zoom-in-95 text-[#172B4D]">
+                  <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
+                    <div className="w-9 h-9 rounded-full bg-[#DFE1E6] text-[#172B4D] flex items-center justify-center font-bold text-xs">
+                      {user.displayName ? user.displayName.slice(0, 2).toUpperCase() : 'JD'}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-[#172B4D] truncate">{user.displayName || 'Google User'}</p>
+                      <p className="text-[11px] text-[#44546F] truncate">{user.email}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-1 flex flex-col gap-1">
+                    {userOrgProfile && (
+                      <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900 mb-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
+                          <span>Org Workspace:</span>
+                          <span className="font-mono text-indigo-600 dark:text-indigo-400">{userOrgProfile.orgId}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">{userOrgProfile.orgName}</p>
+                        {onOpenOrgIdManager && (
+                          <button
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              onOpenOrgIdManager();
+                            }}
+                            className="mt-1.5 w-full py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            <span>Manage Org &amp; Members</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className="px-2 py-1 text-[11px] text-gray-500">
+                      <span>Live 2-Way Sync: </span>
+                      <strong className="text-emerald-600">Active</strong>
+                    </div>
+                    <button
+                      onClick={() => {
+                        onGoogleSignOut();
+                        setShowUserMenu(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="text-left hidden sm:block">
-              <div className="flex items-center gap-1.5 leading-none">
-                <span className="text-xs font-bold">
-                  {user?.displayName || userOrgProfile?.userName || 'Marketing Specialist'}
-                </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active Online Session" />
-              </div>
-            </div>
-          </button>
+          ) : (
+            <button
+              onClick={onGoogleSignIn}
+              className="px-3 py-1 bg-white text-[#0055CC] hover:bg-gray-100 rounded-md text-xs font-bold shadow-xs transition-colors"
+              id="google-sign-in-btn"
+            >
+              Connect Google
+            </button>
+          )}
         </div>
       </nav>
 
@@ -431,6 +620,8 @@ export const Header: React.FC<HeaderProps> = ({
                 setShowWorkspaceToolsMenu(!showWorkspaceToolsMenu);
                 setShowThemeMenu(false);
                 setShowExportMenu(false);
+                setShowUserMenu(false);
+                setShowEmployeeMenu(false);
               }}
               className="px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm rounded-md border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 hover:bg-indigo-100/90 text-indigo-900 dark:text-indigo-200 font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
               id="toolbar-workspace-tools-btn"
@@ -596,6 +787,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => {
                 setShowExportMenu(!showExportMenu);
                 setShowThemeMenu(false);
+                setShowUserMenu(false);
               }}
               className="p-1.5 sm:px-2.5 sm:py-1.5 text-xs sm:text-sm hover:bg-gray-100 rounded-md border border-gray-300 flex items-center gap-1 text-[#44546F]"
               title="Export options"

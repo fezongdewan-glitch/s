@@ -16,7 +16,6 @@ interface KanbanBoardProps {
   onSetWipLimit: (listId: string, limit?: number) => void;
   onMoveCard: (cardId: string, targetListId: string) => void;
   onQuickToggleComplete: (cardId: string) => void;
-  onUpdateStatus?: (cardId: string, status: any) => void;
   onOpenOrgMessages?: (card: CardItem) => void;
 }
 
@@ -32,7 +31,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onSetWipLimit,
   onMoveCard,
   onQuickToggleComplete,
-  onUpdateStatus,
   onOpenOrgMessages,
 }) => {
   const [isAddingList, setIsAddingList] = useState(false);
@@ -180,7 +178,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               onQuickToggleComplete={onQuickToggleComplete}
-              onUpdateStatus={onUpdateStatus}
               onOpenOrgMessages={onOpenOrgMessages}
             />
           );

@@ -13,8 +13,7 @@ import {
   CheckCircle2,
   MessageSquare,
 } from 'lucide-react';
-import { Board, CardItem, CardStatus, ColumnList, FilterState, PriorityLevel } from '../types';
-import { CARD_STATUS_CONFIG, ALL_CARD_STATUSES, getNormalizedCardStatus } from '../utils/statusConfig';
+import { Board, CardItem, ColumnList, FilterState, PriorityLevel } from '../types';
 
 interface SpreadsheetViewProps {
   board: Board;
@@ -238,11 +237,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
                         )}
                         <button
                           onClick={() => onCardClick(card)}
-                          className={`font-semibold text-left line-clamp-1 group-hover:underline cursor-pointer ${
-                            card.completed || getNormalizedCardStatus(card) === 'done'
-                              ? 'line-through text-slate-400 dark:text-slate-500'
-                              : 'text-slate-900 dark:text-slate-100 hover:text-indigo-600 dark:hover:text-indigo-400'
-                          }`}
+                          className="font-semibold text-slate-900 dark:text-slate-100 hover:text-sky-600 dark:hover:text-sky-400 text-left line-clamp-1 group-hover:underline cursor-pointer"
                         >
                           {card.title}
                         </button>
@@ -257,36 +252,23 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
                     {/* Status Dropdown */}
                     <td className="py-3 px-4">
                       <select
-                        value={card.status || getNormalizedCardStatus(card)}
+                        value={card.listId}
                         onChange={(e) => {
-                          const targetStatus = e.target.value as CardStatus;
-                          const isDone = targetStatus === 'done';
-                          let matchingListId = card.listId;
-                          if (targetStatus === 'done') {
-                            matchingListId = board.lists.find((l) => l.title.toLowerCase().includes('done') || l.title.toLowerCase().includes('complete'))?.id || card.listId;
-                          } else if (targetStatus === 'in_process') {
-                            matchingListId = board.lists.find((l) => l.title.toLowerCase().includes('progress') || l.title.toLowerCase().includes('process'))?.id || card.listId;
-                          } else if (targetStatus === 'in_review') {
-                            matchingListId = board.lists.find((l) => l.title.toLowerCase().includes('review'))?.id || card.listId;
-                          } else if (targetStatus === 'backlog') {
-                            matchingListId = board.lists.find((l) => l.title.toLowerCase().includes('backlog'))?.id || card.listId;
-                          } else if (targetStatus === 'pending') {
-                            matchingListId = board.lists.find((l) => l.title.toLowerCase().includes('todo') || l.title.toLowerCase().includes('pending'))?.id || card.listId;
-                          }
-
+                          const targetListId = e.target.value;
+                          const targetList = board.lists.find((l) => l.id === targetListId);
+                          const isDone = targetList?.title.toLowerCase().includes('done') || targetList?.title.toLowerCase().includes('complete');
                           onUpdateCard({
                             ...card,
-                            status: targetStatus,
-                            listId: matchingListId,
+                            listId: targetListId,
                             completed: isDone,
                             updatedAt: new Date().toISOString(),
                           });
                         }}
                         className="w-full px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium text-xs focus:ring-1 focus:ring-sky-500"
                       >
-                        {ALL_CARD_STATUSES.map((st) => (
-                          <option key={st} value={st}>
-                            {CARD_STATUS_CONFIG[st].label}
+                        {board.lists.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.title}
                           </option>
                         ))}
                       </select>

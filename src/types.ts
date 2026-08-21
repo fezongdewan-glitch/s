@@ -1,7 +1,5 @@
 export type PriorityLevel = 'low' | 'medium' | 'high' | 'urgent';
 
-export type CardStatus = 'pending' | 'in_process' | 'in_review' | 'hold' | 'backlog' | 'done';
-
 export interface CardLabel {
   id: string;
   name: string;
@@ -32,13 +30,6 @@ export interface CardAttachment {
   type: 'image' | 'pdf' | 'link' | 'file' | string;
   size?: string;
   mimeType?: string;
-  driveFileId?: string;
-  driveFolderId?: string;
-  driveFileUrl?: string;
-  uploadedAt?: string;
-  uploadStatus?: 'uploading' | 'success' | 'error';
-  uploadProgress?: number;
-  uploadError?: string;
   createdAt: string;
 }
 
@@ -60,11 +51,6 @@ export interface CardItem {
   etaDate?: string; // YYYY-MM-DD (Target ETA / Delivery Date)
   dueDate?: string; // YYYY-MM-DD (Fallback compatibility)
   completed?: boolean;
-  status?: CardStatus;
-  // Google Drive Folder Connection per card
-  driveFolderId?: string;
-  driveFolderName?: string;
-  driveFolderUrl?: string;
   labels: CardLabel[];
   assignees: CardMember[];
   creator?: CardMember;
